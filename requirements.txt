@@ -1,0 +1,18 @@
+# --- Streaming pipeline ---
+quixstreams==3.2.1        # Kafka-native stream processing (windowing), no cluster to run
+confluent-kafka==2.6.1    # low-level producer/consumer (Confluent + Redpanda compatible)
+
+# --- Ingestion ---
+sseclient-py==1.8.0       # Wikipedia EventStreams (Server-Sent Events)
+requests==2.32.3
+
+# --- Storage / serving ---
+duckdb==1.1.3             # local sink + MotherDuck client
+streamlit==1.39.0         # live dashboard
+pandas==2.2.3
+
+# --- Config ---
+python-dotenv==1.0.1
+
+# --- Dev ---
+pytest==8.3.3

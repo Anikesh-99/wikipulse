@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets / local config
+.env
+
+# Local data
+*.duckdb
+*.duckdb.wal
+data/
+
+# OS
+.DS_Store
