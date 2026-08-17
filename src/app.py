@@ -13,6 +13,13 @@ Run:
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
+
+# `streamlit run src/app.py` puts src/ on sys.path, not the project root, so the
+# `src` package isn't importable by default. Add the project root so the shared
+# modules resolve the same way they do under `python -m`.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import duckdb
 import pandas as pd
