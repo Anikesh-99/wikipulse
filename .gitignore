@@ -17,3 +17,6 @@ data/
 
 # OS
 .DS_Store
+
+# Quix Streams local state (RocksDB checkpoints)
+state/

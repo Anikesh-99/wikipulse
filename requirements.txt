@@ -1,6 +1,6 @@
 # --- Streaming pipeline ---
 quixstreams==3.2.1        # Kafka-native stream processing (windowing), no cluster to run
-confluent-kafka==2.6.1    # low-level producer/consumer (Confluent + Redpanda compatible)
+confluent-kafka==2.4.0    # low-level producer/consumer (pinned to match quixstreams)
 
 # --- Ingestion ---
 sseclient-py==1.8.0       # Wikipedia EventStreams (Server-Sent Events)
