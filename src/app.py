@@ -25,9 +25,40 @@ import duckdb
 import pandas as pd
 import streamlit as st
 
-from src.config import CONFIG
-
 st.set_page_config(page_title="WikiPulse", page_icon="📈", layout="wide")
+
+
+def _bridge_cloud_secrets() -> None:
+    """Copy Streamlit Community Cloud secrets into the environment BEFORE config
+    loads, so the same CONFIG works locally (.env) and when hosted (st.secrets).
+
+    dotenv won't override values already in os.environ, so on the cloud these
+    win; locally, where there are no secrets, .env fills them in instead.
+    """
+    # Only touch st.secrets if a secrets.toml actually exists. Accessing it when
+    # absent makes Streamlit render a "No secrets found" warning banner — which
+    # try/except can't suppress because it's a UI side effect, not an exception
+    # in our frame. Streamlit Cloud writes provided secrets to one of these paths.
+    candidates = [
+        Path.home() / ".streamlit" / "secrets.toml",
+        Path(__file__).resolve().parent.parent / ".streamlit" / "secrets.toml",
+    ]
+    if not any(p.exists() for p in candidates):
+        return  # normal local dev: fall back to .env
+    try:
+        secrets = dict(st.secrets)
+    except Exception:
+        return
+    for key in ("DUCKDB_DATABASE", "MOTHERDUCK_TOKEN",
+                "WINDOW_SECONDS", "SPIKE_K"):
+        val = secrets.get(key)
+        if val is not None and str(val).strip():
+            os.environ.setdefault(key, str(val))
+
+
+_bridge_cloud_secrets()
+
+from src.config import CONFIG  # noqa: E402 — must load after secrets are bridged
 
 
 def _query(sql: str) -> pd.DataFrame:

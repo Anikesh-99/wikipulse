@@ -39,10 +39,22 @@ not clever ML. The spike "model" is deliberately dumb (mean + k·σ).
 | **Spike = mean + k·σ over a rolling baseline** | Correctly treats *sustained* busy wikis (Wikidata) as normal and only flags *deviations*. A plain threshold would false-alarm constantly. |
 | **DuckDB / MotherDuck** | Zero-infra local file for dev; MotherDuck is a drop-in cloud warehouse (`md:` prefix) for a genuinely-live dashboard. |
 
+## Is there a free way to run this without a trial?
+
+**Yes — the local setup below is free forever, no trial, no credit card.**
+Redpanda in Docker speaks the real Kafka API, so nothing about the project is
+"less real" for using it. There is currently **no perpetually-free *managed*
+Kafka** (Confluent/Redpanda Cloud are credit-limited trials, Upstash dropped
+Kafka, Aiven removed it from its free plan) — so free Kafka means *you host the
+broker*, locally or on an always-free VM. The storage + dashboard, however, do
+have genuine no-card free tiers (MotherDuck, Streamlit Community Cloud), so the
+part people actually click on can be hosted for $0 — see
+[Deploy the dashboard for free](#deploy-the-dashboard-for-free).
+
 ## Quickstart — fully local (no cloud account)
 
 ```bash
-make install          # venv + deps
+make install          # venv + deps (installs requirements-pipeline.txt)
 make broker-up        # local Redpanda in Docker
 cp .env.example .env  # defaults already point at local Redpanda
 make test             # 13 unit tests (no broker needed)
@@ -101,6 +113,51 @@ Two independent switches, both just `.env` edits.
 3. The sink and dashboard now read/write the cloud database — the dashboard can
    run live alongside the sink.
 
+## Deploy the dashboard for free
+
+Give the project a **live, public URL** with **no trial and no credit card** —
+using Streamlit Community Cloud (hosting) + MotherDuck (storage). The broker and
+pipeline still run locally on demand; only the *data* and *dashboard* live in the
+cloud.
+
+```
+  your laptop                          the cloud (free, no card)
+  ───────────                          ─────────────────────────
+  producer → Redpanda → pipeline ─┐
+                                  └─→ sink ──write──▶  MotherDuck  ◀──read── Streamlit
+                                                       (md:wikipulse)        Community Cloud
+```
+
+**1. MotherDuck (storage).** Sign up at <https://motherduck.com> (free, no card),
+copy your access token. Point your **local** sink at it in `.env`:
+
+```ini
+DUCKDB_DATABASE=md:wikipulse
+MOTHERDUCK_TOKEN=<your-token>
+```
+
+Run the pipeline locally (`make pipeline / sink / producer`) — the sink now
+writes to MotherDuck instead of a local file.
+
+**2. Streamlit Community Cloud (dashboard).** With this repo on GitHub:
+
+1. Go to <https://share.streamlit.io> and sign in with GitHub (free, no card).
+2. **New app** → pick this repo → **Main file path:** `streamlit_app.py`.
+3. **Advanced settings → Secrets** → paste (same format as
+   `.streamlit/secrets.toml.example`):
+   ```toml
+   DUCKDB_DATABASE = "md:wikipulse"
+   MOTHERDUCK_TOKEN = "<your-token>"
+   ```
+4. **Deploy.** You get a public `https://<app>.streamlit.app` URL.
+
+The hosted build installs only `requirements.txt` (lean — no Kafka client), so
+it's fast and reliable. The app reads MotherDuck via the secrets above; locally
+it ignores them and reads `.env` instead.
+
+> The dashboard is live whenever MotherDuck has data. Run your local pipeline to
+> refresh it; stop the pipeline and the last data simply stays put — no cost.
+
 ## Layout
 
 ```
@@ -114,6 +171,10 @@ src/
   app.py         Streamlit dashboard
   kafka_util.py  topic creation helper
 tests/           schema + windowing tests (13, no broker required)
+streamlit_app.py     Streamlit Community Cloud entrypoint (imports src/app.py)
+requirements.txt         lean deps — dashboard/cloud only (Streamlit Cloud uses this)
+requirements-pipeline.txt  full deps — superset for local pipeline dev
+.streamlit/secrets.toml.example   template for hosted secrets
 docker-compose.yml   local Redpanda + console (http://localhost:8080)
 scripts/teardown.sh  stop infra; Confluent cost-off instructions
 Makefile             one-liners for every step

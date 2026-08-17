@@ -1,18 +1,12 @@
-# --- Streaming pipeline ---
-quixstreams==3.2.1        # Kafka-native stream processing (windowing), no cluster to run
-confluent-kafka==2.4.0    # low-level producer/consumer (pinned to match quixstreams)
-
-# --- Ingestion ---
-sseclient-py==1.8.0       # Wikipedia EventStreams (Server-Sent Events)
-requests==2.32.3
-
-# --- Storage / serving ---
-duckdb==1.1.3             # local sink + MotherDuck client
-streamlit==1.39.0         # live dashboard
+# Dashboard / cloud dependencies ONLY.
+#
+# This is the file Streamlit Community Cloud installs, so it is deliberately
+# lean — no Kafka client, no stream processor — keeping the hosted build small
+# and reliable. The dashboard only reads DuckDB/MotherDuck.
+#
+# For the streaming pipeline (producer/processor/sink) install the superset:
+#     pip install -r requirements-pipeline.txt
+streamlit==1.39.0
+duckdb==1.1.3
 pandas==2.2.3
-
-# --- Config ---
 python-dotenv==1.0.1
-
-# --- Dev ---
-pytest==8.3.3

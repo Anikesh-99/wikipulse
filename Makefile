@@ -14,7 +14,7 @@ help:
 	@echo "  make teardown     stop everything (see scripts/teardown.sh)"
 
 install:
-	python3 -m venv .venv && . .venv/bin/activate && pip install -U pip && pip install -r requirements.txt
+	python3 -m venv .venv && . .venv/bin/activate && pip install -U pip && pip install -r requirements-pipeline.txt
 
 broker-up:
 	docker compose up -d

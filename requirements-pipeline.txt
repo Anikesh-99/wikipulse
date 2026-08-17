@@ -1,0 +1,14 @@
+# Full pipeline dependencies (producer + stream processor + sink + dashboard).
+# Superset of requirements.txt — use this for local development.
+-r requirements.txt
+
+# --- Streaming ---
+quixstreams==3.2.1        # Kafka-native stream processing (windowing), no cluster to run
+confluent-kafka==2.4.0    # low-level producer/consumer (pinned to match quixstreams)
+
+# --- Ingestion ---
+sseclient-py==1.8.0       # Wikipedia EventStreams (Server-Sent Events)
+requests==2.32.3
+
+# --- Dev ---
+pytest==8.3.3
