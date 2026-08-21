@@ -1,14 +1,18 @@
 """Live dashboard over the DuckDB sink.
 
-Spoiler on the concurrency footnote: DuckDB is single-writer *per process*. When
-the sink is actively writing a local file, this read-only dashboard may hit a
-lock. For a genuinely live local demo, point both at MotherDuck (a service that
-handles concurrent readers); against a local file, the dashboard is happiest
-viewing data the sink has already committed. Errors are caught and shown rather
-than crashing the page.
+IMPORTANT structure note: all rendering happens inside `main()`, which the entry
+script (streamlit_app.py, or `streamlit run src/app.py`) calls on EVERY rerun.
+Do not move rendering to module top level — Streamlit re-executes the entry
+script each rerun, but Python caches imports, so import-time rendering only fires
+once and every later rerun/session renders a blank page.
+
+Concurrency footnote: DuckDB is single-writer *per process*. When the sink is
+writing a local file, this read-only dashboard may hit a lock; use MotherDuck
+(a service that handles concurrent readers) for a genuinely live local demo.
+Errors are caught and shown rather than crashing the page.
 
 Run:
-    streamlit run src/app.py
+    streamlit run src/app.py       # or: streamlit run streamlit_app.py
 """
 from __future__ import annotations
 
@@ -25,20 +29,19 @@ import duckdb
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="WikiPulse", page_icon="📈", layout="wide")
+from src.config import Config
 
 
 def _bridge_cloud_secrets() -> None:
-    """Copy Streamlit Community Cloud secrets into the environment BEFORE config
-    loads, so the same CONFIG works locally (.env) and when hosted (st.secrets).
+    """Copy Streamlit Community Cloud secrets into the environment BEFORE the
+    Config is built, so the same Config works locally (.env) and hosted
+    (st.secrets). Called at the top of main(), before Config().
 
-    dotenv won't override values already in os.environ, so on the cloud these
-    win; locally, where there are no secrets, .env fills them in instead.
+    Only touch st.secrets if a secrets.toml actually exists — accessing it when
+    absent makes Streamlit render a "No secrets found" banner that try/except
+    can't suppress (it's a UI side effect). Streamlit Cloud writes provided
+    secrets to one of these paths.
     """
-    # Only touch st.secrets if a secrets.toml actually exists. Accessing it when
-    # absent makes Streamlit render a "No secrets found" warning banner — which
-    # try/except can't suppress because it's a UI side effect, not an exception
-    # in our frame. Streamlit Cloud writes provided secrets to one of these paths.
     candidates = [
         Path.home() / ".streamlit" / "secrets.toml",
         Path(__file__).resolve().parent.parent / ".streamlit" / "secrets.toml",
@@ -49,25 +52,21 @@ def _bridge_cloud_secrets() -> None:
         secrets = dict(st.secrets)
     except Exception:
         return
-    for key in ("DUCKDB_DATABASE", "MOTHERDUCK_TOKEN",
-                "WINDOW_SECONDS", "SPIKE_K"):
+    for key in ("DUCKDB_DATABASE", "MOTHERDUCK_TOKEN", "WINDOW_SECONDS", "SPIKE_K"):
         val = secrets.get(key)
         if val is not None and str(val).strip():
             os.environ.setdefault(key, str(val))
 
 
-_bridge_cloud_secrets()
-
-from src.config import CONFIG  # noqa: E402 — must load after secrets are bridged
-
-
-def _query(sql: str) -> pd.DataFrame:
-    if CONFIG.duckdb_database.startswith("md:") and CONFIG.motherduck_token:
-        os.environ["motherduck_token"] = CONFIG.motherduck_token
+def _query(cfg: Config, sql: str) -> pd.DataFrame:
+    if cfg.duckdb_database.startswith("md:") and cfg.motherduck_token:
+        os.environ["motherduck_token"] = cfg.motherduck_token
     try:
-        con = duckdb.connect(CONFIG.duckdb_database, read_only=True)
+        con = duckdb.connect(cfg.duckdb_database, read_only=True)
     except duckdb.Error as exc:
-        st.warning(f"Could not open the database (is the sink mid-write on a local file?): {exc}")
+        st.info("Waiting for data — the database has no metrics yet. "
+                "Run the pipeline (producer → pipeline → sink) to populate it.")
+        st.caption(f"(database: {cfg.duckdb_database} — {type(exc).__name__})")
         return pd.DataFrame()
     try:
         return con.execute(sql).fetch_df()
@@ -76,8 +75,8 @@ def _query(sql: str) -> pd.DataFrame:
 
 
 @st.fragment(run_every="5s")
-def live_view():
-    df = _query("""
+def live_view(cfg: Config):
+    df = _query(cfg, """
         SELECT wiki, window_start, count, baseline_mean, is_spike
         FROM window_metrics
         WHERE window_start >= (SELECT COALESCE(max(window_start), 0) FROM window_metrics) - 3600
@@ -118,6 +117,21 @@ def live_view():
         st.dataframe(show, use_container_width=True, hide_index=True)
 
 
-st.title("📈 WikiPulse — live Wikipedia edit-spike detector")
-st.caption(f"Source: {CONFIG.duckdb_database}  ·  window = {CONFIG.window_seconds}s  ·  spike threshold = mean + {CONFIG.spike_k}σ")
-live_view()
+def main():
+    """Entry point — runs on every Streamlit rerun. set_page_config must be the
+    first Streamlit call, so it leads."""
+    st.set_page_config(page_title="WikiPulse", page_icon="📈", layout="wide")
+    _bridge_cloud_secrets()
+    cfg = Config()  # built AFTER secrets are bridged, so it sees them
+
+    st.title("📈 WikiPulse — live Wikipedia edit-spike detector")
+    st.caption(
+        f"Source: {cfg.duckdb_database}  ·  window = {cfg.window_seconds}s  "
+        f"·  spike threshold = mean + {cfg.spike_k}σ"
+    )
+    live_view(cfg)
+
+
+if __name__ == "__main__":
+    # `streamlit run src/app.py` executes this module as __main__ every rerun.
+    main()
