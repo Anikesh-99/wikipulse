@@ -41,18 +41,20 @@ def _delivery_report(err, msg):
         log.warning("delivery failed for %s: %s", msg.key(), err)
 
 
-def run(max_events: int | None = None, duration: float | None = None) -> int:
-    ensure_topics([CONFIG.topic_edits])
-    producer = Producer(CONFIG.kafka_common())
+# Errors that mean "the stream dropped, reconnect" rather than "give up".
+_RECONNECT_ERRORS = (
+    requests.exceptions.ChunkedEncodingError,   # server ended the response mid-stream
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ReadTimeout,
+)
 
-    stop = {"flag": False}
-    signal.signal(signal.SIGINT, lambda *_: stop.update(flag=True))
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
 
-    deadline = time.monotonic() + duration if duration else None
-    sent = seen = 0
-    log.info("connecting to %s", STREAM_URL)
+def _stream_once(producer, stop, deadline, max_events, counters) -> None:
+    """Open one SSE connection and pump events until it ends or we should stop.
 
+    Updates counters['sent'/'seen'] in place. Raises a _RECONNECT_ERRORS
+    exception if the connection drops — the caller reconnects.
+    """
     resp = requests.get(
         STREAM_URL,
         stream=True,
@@ -61,17 +63,14 @@ def run(max_events: int | None = None, duration: float | None = None) -> int:
     )
     resp.raise_for_status()
     client = sseclient.SSEClient(resp)
-
     try:
         for event in client.events():
-            if stop["flag"]:
-                break
-            if deadline and time.monotonic() > deadline:
-                break
+            if stop["flag"] or (deadline and time.monotonic() > deadline):
+                return
             if event.event != "message" or not event.data:
                 continue
 
-            seen += 1
+            counters["seen"] += 1
             try:
                 raw = json.loads(event.data)
             except json.JSONDecodeError:
@@ -87,20 +86,50 @@ def run(max_events: int | None = None, duration: float | None = None) -> int:
                 value=json.dumps(edit.to_dict()).encode("utf-8"),
                 on_delivery=_delivery_report,
             )
-            sent += 1
+            counters["sent"] += 1
 
-            # Serve delivery callbacks and flush the local queue periodically.
-            producer.poll(0)
-            if sent % 200 == 0:
+            producer.poll(0)  # serve delivery callbacks
+            if counters["sent"] % 200 == 0:
                 producer.flush(5)
-                log.info("produced %d edits (%d events seen)", sent, seen)
+                log.info("produced %d edits (%d events seen)", counters["sent"], counters["seen"])
 
-            if max_events and sent >= max_events:
+            if max_events and counters["sent"] >= max_events:
+                return
+    finally:
+        resp.close()
+
+
+def run(max_events: int | None = None, duration: float | None = None) -> int:
+    ensure_topics([CONFIG.topic_edits])
+    producer = Producer(CONFIG.kafka_common())
+
+    stop = {"flag": False}
+    signal.signal(signal.SIGINT, lambda *_: stop.update(flag=True))
+    signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
+
+    deadline = time.monotonic() + duration if duration else None
+    counters = {"sent": 0, "seen": 0}
+    log.info("connecting to %s", STREAM_URL)
+
+    try:
+        # Reconnect loop: the Wikipedia firehose is long-lived and will
+        # occasionally drop the connection. We reconnect until the caller's
+        # stop / deadline / max_events condition is reached.
+        while not stop["flag"]:
+            if deadline and time.monotonic() > deadline:
                 break
+            if max_events and counters["sent"] >= max_events:
+                break
+            try:
+                _stream_once(producer, stop, deadline, max_events, counters)
+            except _RECONNECT_ERRORS as exc:
+                log.warning("stream dropped (%s); reconnecting in 2s…", type(exc).__name__)
+                producer.poll(0)
+                time.sleep(2)
     finally:
         remaining = producer.flush(10)
-        resp.close()
-        log.info("done: produced %d edits (%d in-flight unflushed)", sent, remaining)
+        log.info("done: produced %d edits (%d in-flight unflushed)", counters["sent"], remaining)
+    return counters["sent"]
     return sent
 
 

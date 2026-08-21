@@ -44,12 +44,23 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 """
 
 
-def connect_duckdb() -> duckdb.DuckDBPyConnection:
-    """Local file, or MotherDuck if DUCKDB_DATABASE starts with 'md:'."""
+def connect_duckdb(read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    """Local file, or MotherDuck if DUCKDB_DATABASE starts with 'md:'.
+
+    For MotherDuck we first ensure the named database exists — attaching to
+    `md:<name>` fails if the database hasn't been created yet, which is the
+    normal state the very first time you run against a fresh MotherDuck account.
+    """
     if CONFIG.duckdb_database.startswith("md:") and CONFIG.motherduck_token:
         os.environ["motherduck_token"] = CONFIG.motherduck_token
-    con = duckdb.connect(CONFIG.duckdb_database)
-    con.execute(SCHEMA)
+        db_name = CONFIG.duckdb_database[len("md:"):].strip()
+        if db_name and not read_only:
+            boot = duckdb.connect("md:")
+            boot.execute(f'CREATE DATABASE IF NOT EXISTS "{db_name}"')
+            boot.close()
+    con = duckdb.connect(CONFIG.duckdb_database, read_only=read_only)
+    if not read_only:
+        con.execute(SCHEMA)
     return con
 
 
